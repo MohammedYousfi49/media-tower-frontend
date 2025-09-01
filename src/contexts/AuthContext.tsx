@@ -22,6 +22,7 @@ export interface AppUser {
     emailVerified: boolean;
     mfaEnabled: boolean;
     mfaVerified?: boolean;
+    profileImageUrl?: string | null; // <-- CHAMP AJOUTÉ ICI
 }
 
 interface AuthContextType {
@@ -59,9 +60,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [authInitialized, setAuthInitialized] = useState(false);
     const [isRegistering, setIsRegistering] = useState(false);
     const navigate = useNavigate();
-
-    // === CORRECTION 1: Ajouter un état pour suivre la vérification MFA de la session ===
-    // Cet état survivra aux re-chargements de appUser et résoudra la boucle.
     const [isMfaSessionVerified, setIsMfaSessionVerified] = useState(false);
 
     const connectWebSocket = useCallback(async (user: User) => {
@@ -102,7 +100,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }, []);
 
     const refreshAppUser = useCallback(async (options?: { mfaVerified?: boolean }) => {
-        // === CORRECTION 2: Mettre à jour l'état de session si l'option est passée ===
         if (options?.mfaVerified) {
             setIsMfaSessionVerified(true);
         }
@@ -119,10 +116,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
 
-            // === CORRECTION 3: Utiliser notre nouvel état persistant pour la session ===
             const updatedUser = {
                 ...response.data,
-                // On utilise isMfaSessionVerified qui est maintenant la source de vérité pour la session.
                 mfaVerified: isMfaSessionVerified
             };
             setAppUser(updatedUser);
@@ -140,7 +135,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 }
             }
         }
-    }, [navigate, isMfaSessionVerified]); // Ajouter isMfaSessionVerified aux dépendances
+    }, [navigate, isMfaSessionVerified]);
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -158,7 +153,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
 
-                    // === CORRECTION 4: Initialiser l'utilisateur avec l'état de session actuel ===
                     setAppUser({ ...response.data, mfaVerified: isMfaSessionVerified });
                     await connectWebSocket(user);
                 } catch (error) {
@@ -171,7 +165,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                     setLoading(false);
                 }
             } else {
-                // === CORRECTION 5: Réinitialiser l'état de la session MFA à la déconnexion ===
                 setIsMfaSessionVerified(false);
                 setAppUser(null);
                 disconnectWebSocket();
@@ -183,7 +176,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             }
         });
         return () => unsubscribe();
-    }, [authInitialized, connectWebSocket, disconnectWebSocket, navigate, isRegistering, isMfaSessionVerified]); // Ajouter isMfaSessionVerified ici aussi
+    }, [authInitialized, connectWebSocket, disconnectWebSocket, navigate, isRegistering, isMfaSessionVerified]);
 
     useEffect(() => {
         return () => {

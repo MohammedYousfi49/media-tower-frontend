@@ -6,6 +6,7 @@ import { DownloadsSection } from '../../components/site/DownloadsSection';
 import { MyServicesSection } from '../../components/site/MyServicesSection';
 import { CheckCircle, AlertTriangle } from 'lucide-react';
 import MfaManager from '../../components/site/MfaManager';
+import ProfileCard from '../../components/site/ProfileCard'; // <-- NOUVEL IMPORT
 
 interface OrderHistory {
     id: number;
@@ -51,7 +52,6 @@ const AccountPage = () => {
             setOrders(newOrders);
             setBookings(bookingsRes.data);
 
-            // Vérifier si des commandes sont passées de PENDING à DELIVERED
             const previouslyPending = prevOrdersRef.current.filter(o => o.status === 'PENDING').map(o => o.id);
             if (previouslyPending.length > 0) {
                 const nowDelivered = newOrders.find(o => previouslyPending.includes(o.id) && o.status === 'DELIVERED');
@@ -60,7 +60,6 @@ const AccountPage = () => {
                 }
             }
 
-            // Reset retry count on success
             retryCountRef.current = 0;
             setError(null);
 
@@ -68,17 +67,14 @@ const AccountPage = () => {
             console.error('Failed to fetch user data:', err);
 
             if (err instanceof AxiosError) {
-                // Si c'est une erreur d'authentification et qu'on est en loading initial
                 if ((err.response?.status === 401 || err.response?.status === 403) && isInitialLoad) {
                     setError('Your session has expired. Please log in again.');
                 }
-                // Si c'est une erreur réseau et qu'on peut retry
                 else if (!err.response && retryCountRef.current < maxRetries) {
                     retryCountRef.current++;
-                    setTimeout(() => fetchData(isInitialLoad), 2000 * retryCountRef.current); // Backoff exponentiel
+                    setTimeout(() => fetchData(isInitialLoad), 2000 * retryCountRef.current);
                     return;
                 }
-                // Autres erreurs
                 else if (isInitialLoad) {
                     setError(err.response?.data?.message || 'Could not load your account data at this time.');
                 }
@@ -94,14 +90,10 @@ const AccountPage = () => {
 
     useEffect(() => {
         fetchData(true);
-
-        // Polling moins fréquent pour éviter les requêtes excessives
-        const intervalId = window.setInterval(() => fetchData(false), 45000); // 45 secondes
-
+        const intervalId = window.setInterval(() => fetchData(false), 45000);
         return () => clearInterval(intervalId);
     }, [fetchData]);
 
-    // Fonction pour retry manuel
     const handleRetry = () => {
         setError(null);
         fetchData(true);
@@ -133,26 +125,38 @@ const AccountPage = () => {
                 </div>
             )}
 
-            <section className="bg-card border border-gray-700 rounded-lg p-6">
-                <h2 className="text-2xl font-semibold mb-4 text-white">My Profile</h2>
-                <div className="space-y-2 text-gray-300">
-                    <p><strong>First Name:</strong> {appUser.firstName || 'Not set'}</p>
-                    <p><strong>Last Name:</strong> {appUser.lastName || 'Not set'}</p>
-                    <p><strong>Email:</strong> {appUser.email}</p>
-                    <div className="flex items-center pt-2">
-                        <strong className="mr-2">Email Status:</strong>
-                        {appUser.emailVerified
-                            ? <span className="flex items-center gap-2 font-semibold text-green-400"><CheckCircle size={18} /> Verified</span>
-                            : <span className="flex items-center gap-2 font-semibold text-yellow-400"><AlertTriangle size={18} /> Not Verified</span>
-                        }
-                    </div>
-                </div>
-            </section>
+            {/* ▼▼▼ NOUVELLE MISE EN PAGE AVEC LA CARTE DE PROFIL ▼▼▼ */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
 
-            <section className="bg-card border border-gray-700 rounded-lg p-6">
-                <h2 className="text-2xl font-semibold mb-4 text-white">Account Security</h2>
-                <MfaManager />
-            </section>
+                {/* --- Colonne de Gauche : Carte de Profil --- */}
+                <div className="lg:col-span-1">
+                    <ProfileCard />
+                </div>
+
+                {/* --- Colonne de Droite : Autres Sections --- */}
+                <div className="lg:col-span-2 space-y-8">
+                    <section className="bg-card border border-gray-700 rounded-lg p-6">
+                        <h2 className="text-2xl font-semibold mb-4 text-white">My Profile Details</h2>
+                        <div className="space-y-2 text-gray-300">
+                            <p><strong>First Name:</strong> {appUser.firstName || 'Not set'}</p>
+                            <p><strong>Last Name:</strong> {appUser.lastName || 'Not set'}</p>
+                            <p><strong>Email:</strong> {appUser.email}</p>
+                            <div className="flex items-center pt-2">
+                                <strong className="mr-2">Email Status:</strong>
+                                {appUser.emailVerified
+                                    ? <span className="flex items-center gap-2 font-semibold text-green-400"><CheckCircle size={18} /> Verified</span>
+                                    : <span className="flex items-center gap-2 font-semibold text-yellow-400"><AlertTriangle size={18} /> Not Verified</span>
+                                }
+                            </div>
+                        </div>
+                    </section>
+
+                    <section className="bg-card border border-gray-700 rounded-lg p-6">
+                        <h2 className="text-2xl font-semibold mb-4 text-white">Account Security</h2>
+                        <MfaManager />
+                    </section>
+                </div>
+            </div>
 
             <DownloadsSection key={downloadsVersion} />
             <MyServicesSection bookings={bookings} isLoading={loading} />

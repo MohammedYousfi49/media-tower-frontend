@@ -1,16 +1,11 @@
-import { useEffect, useState } from 'react';
-import { Eye, Clock, CheckCircle, Truck, XCircle, RefreshCcw, PackageCheck, Download } from 'lucide-react';
+// Fichier : src/pages/admin/Orders.tsx (COMPLET ET FINAL AVEC SUPPRESSION DES ACTIONS)
+
+import { useEffect, useState, useCallback } from 'react';
+import { Clock, CheckCircle, Truck, XCircle, RefreshCcw, PackageCheck, Search, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import axiosClient from '../../api/axiosClient';
-import Modal from '../../components/shared/Modal';
-import { AxiosError } from 'axios';
+import { useDebounce } from '../../hooks/useDebounce';
 
-// Interfaces pour la structure des données
-interface OrderItem {
-    productName: string;
-    quantity: number;
-    unitPrice: number;
-}
-
+// --- Interfaces ---
 interface OrderUser {
     firstName: string;
     lastName: string;
@@ -25,10 +20,13 @@ interface Order {
     orderDate: string;
     status: OrderStatus;
     totalAmount: number;
-    orderItems: OrderItem[];
 }
 
-const ORDER_STATUSES: OrderStatus[] = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUNDED'];
+interface PaginatedOrdersResponse {
+    content: Order[];
+    totalPages: number;
+    number: number;
+}
 
 const StatusBadge = ({ status }: { status: OrderStatus }) => {
     const statusConfig = {
@@ -44,173 +42,108 @@ const StatusBadge = ({ status }: { status: OrderStatus }) => {
     const Icon = config.icon;
 
     return (
-        <span className={`flex items-center text-sm font-medium ${config.color}`}>
+        <span className={`flex items-center justify-center text-sm font-medium ${config.color}`}>
             <Icon className="w-4 h-4 mr-2" />
             {config.label}
         </span>
     );
 };
 
-
 const Orders = () => {
     const [orders, setOrders] = useState<Order[]>([]);
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-    const [currentStatus, setCurrentStatus] = useState<OrderStatus>('PENDING');
-    const [isDownloading, setIsDownloading] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
+    const debouncedSearchTerm = useDebounce(searchTerm, 500);
+    const [currentPage, setCurrentPage] = useState(0);
+    const [totalPages, setTotalPages] = useState(0);
 
-    useEffect(() => {
-        fetchOrders();
-    }, []);
-
-    const fetchOrders = async () => {
+    const fetchOrders = useCallback(async (page: number, search: string) => {
+        setLoading(true);
         try {
-            const response = await axiosClient.get('/orders');
-            setOrders(response.data);
+            const response = await axiosClient.get<PaginatedOrdersResponse>('/orders', {
+                params: { page, size: 10, search, sort: 'orderDate,desc' }
+            });
+            setOrders(response.data.content || []);
+            setTotalPages(response.data.totalPages || 0);
+            setCurrentPage(response.data.number || 0);
         } catch (error) {
             console.error('Failed to fetch orders:', error);
-        }
-    };
-
-    const handleOpenModal = (order: Order) => {
-        setSelectedOrder(order);
-        setCurrentStatus(order.status);
-        setIsModalOpen(true);
-    };
-
-    const handleCloseModal = () => {
-        setIsModalOpen(false);
-        setSelectedOrder(null);
-    };
-
-    const handleStatusUpdate = async () => {
-        if (!selectedOrder) return;
-        try {
-            await axiosClient.put(`/orders/${selectedOrder.id}/status?status=${currentStatus}`);
-            fetchOrders();
-            handleCloseModal();
-        } catch (error) {
-            console.error('Failed to update order status:', error);
-            alert('Failed to update status.');
-        }
-    };
-
-    const handleDownloadInvoice = async (orderId: number) => {
-        setIsDownloading(true);
-        try {
-            try {
-                await axiosClient.post(`/invoices/generate/${orderId}?includesVAT=true`);
-            } catch (error) {
-                const axiosError = error as AxiosError;
-                if (axiosError.response?.status !== 409) {
-                    throw error;
-                }
-            }
-
-            const invoiceResponse = await axiosClient.get(`/invoices/by-order/${orderId}`);
-            const invoiceId = invoiceResponse.data.id;
-
-            window.open(`http://localhost:8080/api/invoices/pdf/${invoiceId}`);
-
-        } catch (error) {
-            console.error('Failed to download invoice:', error);
-            alert('Could not download the invoice. Please check the console.');
+            setOrders([]);
         } finally {
-            setIsDownloading(false);
+            setLoading(false);
         }
+    }, []);
+
+    useEffect(() => {
+        void fetchOrders(currentPage, debouncedSearchTerm);
+    }, [currentPage, debouncedSearchTerm, fetchOrders]);
+
+    const renderPageNumbers = () => {
+        const pageNumbers = [];
+        const startPage = Math.max(0, currentPage - 2);
+        const endPage = Math.min(totalPages - 1, currentPage + 2);
+
+        if (startPage > 0) {
+            pageNumbers.push(<button key={0} onClick={() => setCurrentPage(0)} className="pagination-number">1</button>);
+            if (startPage > 1) pageNumbers.push(<span key="start-dots" className="pagination-dots">...</span>);
+        }
+        for (let i = startPage; i <= endPage; i++) {
+            pageNumbers.push(<button key={i} onClick={() => setCurrentPage(i)} className={`pagination-number ${currentPage === i ? 'pagination-active' : ''}`}>{i + 1}</button>);
+        }
+        if (endPage < totalPages - 1) {
+            if (endPage < totalPages - 2) pageNumbers.push(<span key="end-dots" className="pagination-dots">...</span>);
+            pageNumbers.push(<button key={totalPages - 1} onClick={() => setCurrentPage(totalPages - 1)} className="pagination-number">{totalPages}</button>);
+        }
+        return pageNumbers;
     };
+
 
     return (
         <div>
-            <h1 className="text-3xl font-bold text-white mb-6">Manage Orders</h1>
+            <div className="flex justify-between items-center mb-6">
+                <h1 className="text-3xl font-bold text-white">Manage Orders</h1>
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                    <input value={searchTerm} onChange={e => { setSearchTerm(e.target.value); setCurrentPage(0); }} placeholder="Search by ID or customer..." className="w-full bg-card border border-gray-700 rounded-lg pl-10 pr-4 py-2" />
+                </div>
+            </div>
 
-            <div className="bg-card p-4 rounded-lg border border-gray-700">
-                {/* --- CORRECTION : LE CODE COMPLET DU TABLEAU EST REMIS ICI --- */}
+            <div className="bg-card rounded-lg border border-gray-700 overflow-x-auto">
                 <table className="w-full text-left">
-                    <thead>
+                    <thead className="bg-gray-800/50">
                     <tr className="border-b border-gray-600">
-                        <th className="p-4">Order ID</th>
-                        <th className="p-4">Customer</th>
-                        <th className="p-4">Date</th>
-                        <th className="p-4">Total</th>
-                        <th className="p-4">Status</th>
-                        <th className="p-4">Actions</th>
+                        <th className="p-4 text-gray-300 w-24">Order ID</th>
+                        <th className="p-4 text-gray-300">Customer</th>
+                        <th className="p-4 text-gray-300">Email</th>
+                        <th className="p-4 text-gray-300 w-32">Date</th>
+                        <th className="p-4 text-gray-300 text-right w-40">Total</th>
+                        <th className="p-4 text-gray-300 text-center w-48">Status</th>
+                        {/* ▼▼▼ COLONNE ACTIONS SUPPRIMÉE ▼▼▼ */}
                     </tr>
                     </thead>
                     <tbody>
-                    {orders.map((order) => (
-                        <tr key={order.id} className="border-b border-gray-700 hover:bg-gray-800">
-                            <td className="p-4 font-mono">#{order.id}</td>
-                            <td className="p-4">{order.user.firstName} {order.user.lastName}</td>
-                            <td className="p-4">{new Date(order.orderDate).toLocaleDateString()}</td>
-                            <td className="p-4">{order.totalAmount.toFixed(2)} DH</td>
-                            <td className="p-4"><StatusBadge status={order.status} /></td>
-                            <td className="p-4">
-                                <button onClick={() => handleOpenModal(order)} className="text-blue-400 hover:text-blue-300">
-                                    <Eye size={20} />
-                                </button>
-                            </td>
-                        </tr>
-                    ))}
+                    {loading ? ( <tr><td colSpan={6} className="text-center p-8"><Loader2 className="animate-spin mx-auto text-primary" /></td></tr> )
+                        : orders.map((order) => (
+                            <tr key={order.id} className="border-b border-gray-700 last:border-b-0 hover:bg-gray-800/50">
+                                <td className="p-4 font-mono">#{order.id}</td>
+                                <td className="p-4 font-medium">{order.user.firstName} {order.user.lastName}</td>
+                                <td className="p-4 text-gray-400">{order.user.email}</td>
+                                <td className="p-4 text-gray-400">{new Date(order.orderDate).toLocaleDateString()}</td>
+                                <td className="p-4 text-right font-mono">{order.totalAmount.toFixed(2)} DH</td>
+                                <td className="p-4 text-center"><StatusBadge status={order.status} /></td>
+                                {/* ▼▼▼ CELLULE ACTIONS SUPPRIMÉE ▼▼▼ */}
+                            </tr>
+                        ))}
                     </tbody>
                 </table>
             </div>
 
-            {selectedOrder && (
-                <Modal isOpen={isModalOpen} onClose={handleCloseModal} title={`Order Details #${selectedOrder.id}`}>
-                    <div className="space-y-4">
-                        {/* --- CORRECTION : LE CODE COMPLET DE LA MODALE EST REMIS ICI --- */}
-                        <div>
-                            <h3 className="font-bold text-white">Customer Information</h3>
-                            <p className="text-gray-400">{selectedOrder.user.firstName} {selectedOrder.user.lastName}</p>
-                            <p className="text-gray-400">{selectedOrder.user.email}</p>
-                        </div>
-                        <div>
-                            <h3 className="font-bold text-white">Order Items</h3>
-                            <ul className="list-disc list-inside text-gray-400 mt-2 space-y-1">
-                                {selectedOrder.orderItems.map((item, index) => (
-                                    <li key={index}>
-                                        {item.quantity} x {item.productName} @ {item.unitPrice.toFixed(2)} DH
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                        <div className="border-t border-gray-600 pt-4">
-                            <p className="font-bold text-white text-lg flex justify-between">
-                                <span>Total Amount:</span>
-                                <span>{selectedOrder.totalAmount.toFixed(2)} DH</span>
-                            </p>
-                        </div>
-
-                        <div className="border-t border-gray-600 pt-4">
-                            <button
-                                onClick={() => handleDownloadInvoice(selectedOrder.id)}
-                                disabled={isDownloading}
-                                className="w-full flex items-center justify-center bg-green-600 text-white font-bold py-2 rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-500"
-                            >
-                                <Download className="w-5 h-5 mr-2" />
-                                {isDownloading ? 'Generating...' : 'Download Invoice (PDF)'}
-                            </button>
-                        </div>
-
-                        <div>
-                            <label className="block font-bold text-white mb-2">Update Order Status</label>
-                            <select
-                                value={currentStatus}
-                                onChange={(e) => setCurrentStatus(e.target.value as OrderStatus)}
-                                className="w-full bg-gray-700 text-white p-2 rounded-md border border-gray-600"
-                            >
-                                {ORDER_STATUSES.map(status => (
-                                    <option key={status} value={status}>{status}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="flex justify-end space-x-4 pt-4">
-                            <button type="button" onClick={handleCloseModal} className="bg-gray-600 text-white px-4 py-2 rounded-lg">Close</button>
-                            <button type="button" onClick={handleStatusUpdate} className="bg-primary text-white px-4 py-2 rounded-lg">Save Status</button>
-                        </div>
-                    </div>
-                </Modal>
+            {totalPages > 1 && (
+                <div className="flex justify-between items-center mt-6 text-white">
+                    <button onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 0 || loading} className="pagination-arrow"><ChevronLeft size={20}/></button>
+                    <div className="flex items-center">{renderPageNumbers()}</div>
+                    <button onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage >= totalPages - 1 || loading} className="pagination-arrow"><ChevronRight size={20}/></button>
+                </div>
             )}
         </div>
     );

@@ -1,8 +1,9 @@
+// Fichier : src/App.tsx (COMPLET ET FINAL)
+
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Outlet } from 'react-router-dom';
-import { useAuth } from './hooks/useAuth';
-import { AuthProviderWrapper } from './contexts/AuthContext';
-import { CartProvider } from './contexts/CartContext';
+import { useAuth, AuthProvider } from './contexts/AuthContext';
+import CartProvider from './contexts/CartContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { requestNotificationPermission } from './lib/firebase';
 
@@ -18,7 +19,7 @@ import Register from './pages/auth/Register';
 import VerifyEmailPage from './pages/auth/VerifyEmailPage';
 import ForgotPassword from './pages/auth/ForgotPassword';
 import ResetPassword from './pages/auth/ResetPassword';
-import Verify2FAPage from './pages/auth/Verify2FAPage'; // NOUVEL IMPORT
+import Verify2FAPage from './pages/auth/Verify2FAPage';
 
 // Admin Pages
 import DashboardAdmin from './pages/admin/Dashboard';
@@ -34,7 +35,7 @@ import SettingsAdmin from './pages/admin/Settings';
 import TagsAdmin from './pages/admin/Tags';
 import ReviewsAdmin from './pages/admin/Reviews';
 import PacksAdmin from './pages/admin/Packs';
-import InboxAdmin from './pages/admin/Inbox';
+import AuditLogPage from './pages/admin/AuditLogPage';
 
 // Site Pages
 import HomePage from './pages/site/HomePage';
@@ -62,7 +63,7 @@ function AppContent() {
     return (
         <Routes>
             {/* --- Site Routes --- */}
-            <Route path="/" element={<SiteLayout><Outlet/></SiteLayout>}>
+            <Route path="/" element={<SiteLayout><Outlet /></SiteLayout>}>
                 <Route index element={<HomePage />} />
                 <Route path="products" element={<ProductListPage />} />
                 <Route path="products/:id" element={<ProductDetailsPage />} />
@@ -71,10 +72,20 @@ function AppContent() {
                 <Route path="cart" element={<CartPage />} />
                 <Route path="checkout" element={<CheckoutPage />} />
                 <Route path="order-confirmation/:orderId" element={<OrderConfirmationPage />} />
-                <Route path="checkout/booking/:bookingId" element={ <ProtectedRoute allowedRoles={['USER', 'SELLER', 'ADMIN']}><BookingCheckoutPage /></ProtectedRoute> } />
-                <Route path="booking-confirmation/:bookingId" element={<BookingConfirmationPage />} />
                 <Route path="page/:slug" element={<ContentPage />} />
-                <Route path="account" element={ <ProtectedRoute allowedRoles={['USER', 'SELLER', 'ADMIN']}><AccountPage /></ProtectedRoute> } />
+
+                <Route
+                    path="checkout/booking/:bookingId"
+                    element={ <ProtectedRoute allowedRoles={['USER', 'SELLER', 'ADMIN']}><BookingCheckoutPage /></ProtectedRoute> }
+                />
+                <Route
+                    path="booking-confirmation/:bookingId"
+                    element={ <ProtectedRoute allowedRoles={['USER', 'SELLER', 'ADMIN']}><BookingConfirmationPage /></ProtectedRoute> }
+                />
+                <Route
+                    path="account"
+                    element={ <ProtectedRoute allowedRoles={['USER', 'SELLER', 'ADMIN']}><AccountPage /></ProtectedRoute> }
+                />
             </Route>
 
             {/* --- Auth Routes --- */}
@@ -84,12 +95,11 @@ function AppContent() {
             <Route path="/auth-redirect" element={<AuthRedirect />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
-
-            {/* === NOUVELLE ROUTE POUR LA VÉRIFICATION MFA === */}
             <Route path="/verify-2fa" element={<Verify2FAPage />} />
 
             {/* --- Admin Routes --- */}
-            <Route path="/admin" element={ <ProtectedRoute allowedRoles={['ADMIN', 'SELLER']}><AdminLayout><Outlet /></AdminLayout></ProtectedRoute> }>
+            <Route path="/admin" element={ <ProtectedRoute allowedRoles={['ADMIN', 'SELLER']}><AdminLayout /></ProtectedRoute> }>
+                <Route index element={<DashboardAdmin />} />
                 <Route path="dashboard" element={<DashboardAdmin />} />
                 <Route path="products" element={<ProductsAdmin />} />
                 <Route path="packs" element={<PacksAdmin />} />
@@ -100,10 +110,10 @@ function AppContent() {
                 <Route path="orders" element={<OrdersAdmin />} />
                 <Route path="bookings" element={<BookingsAdmin />} />
                 <Route path="promotions" element={<PromotionsAdmin />} />
-                <Route path="inbox" element={<InboxAdmin />} />
                 <Route path="users" element={<UsersAdmin />} />
                 <Route path="content" element={<ContentAdmin />} />
                 <Route path="settings" element={<SettingsAdmin />} />
+                <Route path="audit-logs" element={<AuditLogPage />} />
             </Route>
         </Routes>
     );
@@ -112,13 +122,13 @@ function AppContent() {
 function App() {
     return (
         <BrowserRouter>
-            <AuthProviderWrapper>
+            <AuthProvider>
                 <SettingsProvider>
                     <CartProvider>
                         <AppContent />
                     </CartProvider>
                 </SettingsProvider>
-            </AuthProviderWrapper>
+            </AuthProvider>
         </BrowserRouter>
     );
 }

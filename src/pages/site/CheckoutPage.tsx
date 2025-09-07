@@ -4,20 +4,18 @@ import { useCart } from '../../contexts/CartContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useTranslation } from 'react-i18next';
 import axiosClient from '../../api/axiosClient';
-
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 
 const stripePromise = loadStripe('pk_test_51RkAjIDGKeXaOom7IpQa3vQoKsKWC9fXSxPmjJQbeEt6INjeZdWL7Vk5yYvvLnV8fR8C7jH4OeEyBuEq06HpoJPq00HsSLzEhc');
-const PAYPAL_CLIENT_ID = 'AR7J4ROoRhXZn8p2rUXjjQTdboPHCS6IclEv05jscGuEAZhi6pFuUDjkaclTPgx8Jo-PRiHFhCy0v0zN';
+const PAYPAL_CLIENT_ID = 'AR7J4ROoRhXZn8p2rUXjjQTdboPHCS6IclEv05jscGuEAZhi6pFuUDjkaclTPgx8Jo-PRiHFhCy0v0zN'; // Votre clé de test
 
 const StripePaymentForm = ({ orderId }: { orderId: number }) => {
     const stripe = useStripe();
     const elements = useElements();
     const [loading, setLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    // const { clearCart } = useCart(); // <<< CORRECTION : Ligne supprimée
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -60,16 +58,19 @@ const StripePaymentForm = ({ orderId }: { orderId: number }) => {
 };
 
 const CheckoutPage = () => {
-    const { cartItems, totalPrice, clearCart } = useCart();
+    // ▼▼▼ CORRECTION N°1 : Remplacer "totalPrice" par les nouvelles valeurs du contexte ▼▼▼
+    const { cartItems, isCartLoaded, finalPrice, appliedPromotion } = useCart();
     const { currentUser } = useAuth();
     const { t } = useTranslation();
     const navigate = useNavigate();
 
     const [paymentMethod, setPaymentMethod] = useState('STRIPE');
     const [loading, setLoading] = useState(false);
-    const [createdOrder, setCreatedOrder] = useState<{ id: number } | null>(null);
+    // On s'assure que le type inclut aussi totalAmount pour les cas à 0€
+    const [createdOrder, setCreatedOrder] = useState<{ id: number; totalAmount: number; } | null>(null);
     const [clientSecret, setClientSecret] = useState<string | null>(null);
 
+    // ▼▼▼ CORRECTION N°2 : Envoyer le code promo au backend ▼▼▼
     const createOrderInBackend = async () => {
         if (!currentUser) {
             alert(t('loginToCheckout'));
@@ -82,6 +83,8 @@ const CheckoutPage = () => {
         try {
             const orderDto = {
                 orderItems: cartItems.map(item => ({ productId: item.id, quantity: item.quantity })),
+                // Ajout de la promotion si elle existe
+                promotionCode: appliedPromotion ? appliedPromotion.code : null
             };
             const response = await axiosClient.post('/orders', orderDto);
             setCreatedOrder(response.data);
@@ -98,7 +101,7 @@ const CheckoutPage = () => {
 
     useEffect(() => {
         const createStripeIntent = async () => {
-            if (createdOrder && paymentMethod === 'STRIPE') {
+            if (createdOrder && paymentMethod === 'STRIPE' && createdOrder.totalAmount > 0) {
                 try {
                     const response = await axiosClient.post('/payments/stripe/create-payment-intent', {
                         orderId: createdOrder.id
@@ -110,7 +113,7 @@ const CheckoutPage = () => {
                 }
             }
         };
-        createStripeIntent();
+        void createStripeIntent();
     }, [createdOrder, paymentMethod]);
 
     const createPayPalOrder = async (): Promise<string> => {
@@ -124,27 +127,29 @@ const CheckoutPage = () => {
     const onApprovePayPal = async (data: { orderID: string }): Promise<void> => {
         try {
             console.log('🔄 Capturing PayPal payment...');
-            const response = await axiosClient.post('/payments/paypal/capture-order', {
+            await axiosClient.post('/payments/paypal/capture-order', {
                 paypalOrderId: data.orderID,
                 orderId: createdOrder?.id.toString()
             });
-            if (response.data.status === 'success') {
-                console.log('✅ PayPal payment captured and confirmed');
-                clearCart();
-                navigate(`/order-confirmation/${createdOrder?.id}?payment_method=paypal`);
-            } else {
-                console.error('PayPal capture failed:', response.data);
-                alert('There was an issue with your PayPal payment. Please try again.');
-            }
+            // Le clearCart est géré par la page de confirmation
+            navigate(`/order-confirmation/${createdOrder?.id}?payment_method=paypal`);
         } catch (error) {
             console.error('PayPal capture failed:', error);
             alert('There was an issue processing your PayPal payment. Please try again.');
         }
     };
 
-    if (cartItems.length === 0) {
-        navigate('/products');
-        return null;
+    // ▼▼▼ CORRECTION N°3 : Rendre la redirection non bloquante ▼▼▼
+    useEffect(() => {
+        // Cette vérification ne se fait que si le chargement du panier est terminé
+        if (isCartLoaded && cartItems.length === 0) {
+            navigate('/products');
+        }
+    }, [isCartLoaded, cartItems, navigate]);
+
+    // Affiche un état vide ou un chargement tant que le panier n'est pas prêt
+    if (!isCartLoaded) {
+        return null; // Affiche une page blanche pendant une fraction de seconde, comme dans votre version originale
     }
 
     return (
@@ -154,17 +159,18 @@ const CheckoutPage = () => {
                 <div className="bg-card p-6 rounded-lg border border-gray-700">
                     <h2 className="text-2xl font-bold mb-4">Your Order</h2>
                     {cartItems.map(item => (
-                        <div key={item.id} className="flex justify-between py-1">
+                        <div key={`${item.type}-${item.id}`} className="flex justify-between py-1">
                             <span>{item.name} x {item.quantity}</span>
                             <span>{(item.price * item.quantity).toFixed(2)} DH</span>
                         </div>
                     ))}
                     <div className="border-t border-gray-600 mt-4 pt-4 flex justify-between font-bold text-xl">
                         <span>{t('total')}</span>
-                        <span>{totalPrice.toFixed(2)} DH</span>
+                        {/* Utilisation de finalPrice au lieu de totalPrice */}
+                        <span>{(finalPrice || 0).toFixed(2)} DH</span>
                     </div>
                     {!createdOrder && (
-                        <button onClick={createOrderInBackend} disabled={loading || totalPrice <= 0} className="w-full mt-6 bg-green-600 text-white font-bold py-3 rounded-lg hover:bg-green-700 disabled:bg-gray-500">
+                        <button onClick={createOrderInBackend} disabled={loading || (finalPrice || 0) < 0} className="w-full mt-6 bg-green-600 text-white font-bold py-3 rounded-lg hover:bg-green-700 disabled:bg-gray-500">
                             {loading ? 'Creating Order...' : '1. Confirm Order Details'}
                         </button>
                     )}
@@ -177,39 +183,49 @@ const CheckoutPage = () => {
                 {createdOrder && (
                     <div className="bg-card p-6 rounded-lg border border-gray-700">
                         <h2 className="text-2xl font-bold mb-4">2. Choose Payment Method</h2>
-                        <div className="space-y-3">
-                            <label className="flex items-center p-3 border border-gray-600 rounded-lg">
-                                <input type="radio" name="paymentMethod" value="STRIPE" checked={paymentMethod === 'STRIPE'} onChange={e => setPaymentMethod(e.target.value)} className="w-4 h-4 mr-3" />
-                                <span>💳 Credit Card (Stripe)</span>
-                            </label>
-                            <label className="flex items-center p-3 border border-gray-600 rounded-lg">
-                                <input type="radio" name="paymentMethod" value="PAYPAL" checked={paymentMethod === 'PAYPAL'} onChange={e => setPaymentMethod(e.target.value)} className="w-4 h-4 mr-3" />
-                                <span>🅿️ PayPal</span>
-                            </label>
-                        </div>
-                        <div className="mt-6">
-                            {paymentMethod === 'STRIPE' && clientSecret && (
-                                <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'night' } }}>
-                                    <StripePaymentForm orderId={createdOrder.id} />
-                                </Elements>
-                            )}
-                            {paymentMethod === 'PAYPAL' && (
-                                <PayPalScriptProvider options={{ clientId: PAYPAL_CLIENT_ID, currency: "USD" }}>
-                                    <PayPalButtons
-                                        style={{ layout: "vertical" }}
-                                        createOrder={createPayPalOrder}
-                                        onApprove={onApprovePayPal}
-                                        onError={(error) => { console.error('PayPal error:', error); alert('PayPal payment failed. Please try again.'); }}
-                                        onCancel={() => { console.log('PayPal payment cancelled by user'); }}
-                                    />
-                                </PayPalScriptProvider>
-                            )}
-                        </div>
+                        {createdOrder.totalAmount > 0 ? (
+                            <>
+                                <div className="space-y-3">
+                                    <label className="flex items-center p-3 border border-gray-600 rounded-lg">
+                                        <input type="radio" name="paymentMethod" value="STRIPE" checked={paymentMethod === 'STRIPE'} onChange={e => setPaymentMethod(e.target.value)} className="w-4 h-4 mr-3" />
+                                        <span>💳 Credit Card (Stripe)</span>
+                                    </label>
+                                    <label className="flex items-center p-3 border border-gray-600 rounded-lg">
+                                        <input type="radio" name="paymentMethod" value="PAYPAL" checked={paymentMethod === 'PAYPAL'} onChange={e => setPaymentMethod(e.target.value)} className="w-4 h-4 mr-3" />
+                                        <span>🅿️ PayPal</span>
+                                    </label>
+                                </div>
+                                <div className="mt-6">
+                                    {paymentMethod === 'STRIPE' && clientSecret && (
+                                        <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'night' } }}>
+                                            <StripePaymentForm orderId={createdOrder.id} />
+                                        </Elements>
+                                    )}
+                                    {paymentMethod === 'PAYPAL' && (
+                                        <PayPalScriptProvider options={{ clientId: PAYPAL_CLIENT_ID, currency: "USD" }}>
+                                            <PayPalButtons
+                                                style={{ layout: "vertical" }}
+                                                createOrder={createPayPalOrder}
+                                                onApprove={onApprovePayPal}
+                                                onError={(error) => { console.error('PayPal error:', error); alert('PayPal payment failed. Please try again.'); }}
+                                                onCancel={() => { console.log('PayPal payment cancelled by user'); }}
+                                            />
+                                        </PayPalScriptProvider>
+                                    )}
+                                </div>
+                            </>
+                        ) : (
+                            <div className="text-center p-4 bg-green-900 text-green-200 rounded-lg">
+                                Your order total is 0.00 DH. Your products will be delivered shortly.
+                                <button onClick={() => navigate(`/order-confirmation/${createdOrder.id}`)} className="w-full mt-4 bg-primary text-white font-bold py-2 rounded-lg">
+                                    Go to Confirmation
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
         </div>
     );
 };
-
 export default CheckoutPage;

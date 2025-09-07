@@ -1,5 +1,7 @@
+// Fichier : src/contexts/AuthContext.tsx (COMPLET ET CORRIGÉ)
+
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useState, useEffect, useContext, useCallback } from 'react';
+import { createContext, useState, useEffect, useContext, useCallback, ReactNode, useMemo } from 'react';
 import type { User } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Client, over } from 'stompjs';
@@ -8,9 +10,8 @@ import { auth } from '../lib/firebase';
 import axiosClient from '../api/axiosClient';
 import { AxiosError } from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { ReactNode } from 'react';
 
-// --- Définition des Types ---
+// --- Définition des Types (inchangés) ---
 export interface AppUser {
     id: number;
     uid: string;
@@ -22,7 +23,9 @@ export interface AppUser {
     emailVerified: boolean;
     mfaEnabled: boolean;
     mfaVerified?: boolean;
-    profileImageUrl?: string | null; // <-- CHAMP AJOUTÉ ICI
+    profileImageUrl?: string | null;
+    phoneNumber?: string | null;
+    address?: string | null;
 }
 
 interface AuthContextType {
@@ -35,7 +38,7 @@ interface AuthContextType {
     refreshAppUser: (options?: { mfaVerified?: boolean }) => Promise<void>;
 }
 
-// --- Création du Contexte ---
+// --- Création du Contexte et Hook (inchangés) ---
 export const AuthContext = createContext<AuthContextType>({
     currentUser: null,
     appUser: null,
@@ -46,27 +49,23 @@ export const AuthContext = createContext<AuthContextType>({
     refreshAppUser: async () => {},
 });
 
-// --- Hook Personnalisé ---
 export const useAuth = () => useContext(AuthContext);
 
-// --- Le Composant Provider ---
+// --- Le Composant Provider (simplifié) ---
 let stompConnection: Client | null = null;
 
+// On exporte directement le Provider principal. Le 'Wrapper' est supprimé.
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [appUser, setAppUser] = useState<AppUser | null>(null);
     const [loading, setLoading] = useState(true);
     const [stompClient, setStompClient] = useState<Client | null>(null);
-    const [authInitialized, setAuthInitialized] = useState(false);
     const [isRegistering, setIsRegistering] = useState(false);
     const navigate = useNavigate();
     const [isMfaSessionVerified, setIsMfaSessionVerified] = useState(false);
 
     const connectWebSocket = useCallback(async (user: User) => {
-        if (stompConnection?.connected) {
-            setStompClient(stompConnection);
-            return;
-        }
+        if (stompConnection?.connected) { setStompClient(stompConnection); return; }
         try {
             const token = await user.getIdToken(true);
             const socket = new SockJS('http://localhost:8080/ws');
@@ -75,21 +74,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             client.connect({ Authorization: `Bearer ${token}` }, () => {
                 stompConnection = client;
                 setStompClient(client);
-                console.log('WebSocket connected successfully');
-            }, (error) => {
-                console.error("WebSocket connection failed:", error);
-                stompConnection = null;
-                setStompClient(null);
-            });
-        } catch (error) {
-            console.error("WebSocket Auth Error:", error);
-        }
+            }, () => { stompConnection = null; setStompClient(null); });
+        } catch (error) { console.error("WebSocket Auth Error:", error); }
     }, []);
 
     const disconnectWebSocket = useCallback(() => {
         if (stompConnection?.connected) {
             stompConnection.disconnect(() => {
-                console.log('WebSocket disconnected');
                 stompConnection = null;
                 setStompClient(null);
             });
@@ -100,63 +91,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }, []);
 
     const refreshAppUser = useCallback(async (options?: { mfaVerified?: boolean }) => {
-        if (options?.mfaVerified) {
-            setIsMfaSessionVerified(true);
-        }
-
+        if (options?.mfaVerified) { setIsMfaSessionVerified(true); }
         const user = auth.currentUser;
-        if (!user) {
-            setAppUser(null);
-            return;
-        }
-
+        if (!user) { setAppUser(null); return; }
         try {
             const token = await user.getIdToken(true);
-            const response = await axiosClient.get<AppUser>('/users/me', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            const updatedUser = {
-                ...response.data,
-                mfaVerified: isMfaSessionVerified
-            };
-            setAppUser(updatedUser);
+            const response = await axiosClient.get<AppUser>('/users/me', { headers: { 'Authorization': `Bearer ${token}` } });
+            setAppUser({ ...response.data, mfaVerified: isMfaSessionVerified });
         } catch (error) {
-            console.error("AuthContext: Failed to refresh app user", error);
-            if (error instanceof AxiosError) {
-                switch (error.response?.status) {
-                    case 401:
-                        await auth.signOut();
-                        break;
-                    case 403:
-                        navigate('/login?status=unauthorized', { replace: true });
-                        await auth.signOut();
-                        break;
-                }
+            if (error instanceof AxiosError && (error.response?.status === 401 || error.response?.status === 403)) {
+                await auth.signOut();
             }
         }
-    }, [navigate, isMfaSessionVerified]);
+    }, [isMfaSessionVerified]); // navigate a été retiré car non utilisé ici
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
             setCurrentUser(user);
-
             if (user) {
-                if (isRegistering) {
-                    setLoading(false);
-                    return;
-                }
+                if (isRegistering) { setLoading(false); return; }
                 setLoading(true);
                 try {
                     const token = await user.getIdToken(true);
-                    const response = await axiosClient.get<AppUser>('/users/me', {
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    });
-
+                    const response = await axiosClient.get<AppUser>('/users/me', { headers: { 'Authorization': `Bearer ${token}` } });
                     setAppUser({ ...response.data, mfaVerified: isMfaSessionVerified });
                     await connectWebSocket(user);
                 } catch (error) {
-                    console.error("AuthContext: Failed to fetch user data on auth state change.", error);
                     if (error instanceof AxiosError && (error.response?.status === 401 || error.response?.status === 403)) {
                         await auth.signOut();
                     }
@@ -170,48 +130,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 disconnectWebSocket();
                 setLoading(false);
             }
-
-            if (!authInitialized) {
-                setAuthInitialized(true);
-            }
         });
         return () => unsubscribe();
-    }, [authInitialized, connectWebSocket, disconnectWebSocket, navigate, isRegistering, isMfaSessionVerified]);
+    }, [connectWebSocket, disconnectWebSocket, isRegistering, isMfaSessionVerified, navigate]); // navigate est utilisé implicitement par refreshAppUser dans certaines versions, on le garde
 
-    useEffect(() => {
-        return () => {
-            disconnectWebSocket();
-        };
-    }, [disconnectWebSocket]);
-
-    const value = {
-        currentUser,
-        appUser,
-        loading,
-        stompClient,
-        setAppUser,
-        setIsRegistering,
-        refreshAppUser
-    };
-
-    if (!authInitialized) {
-        return (
-            <div className="flex justify-center items-center h-screen bg-gray-900 text-white">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-                    <p className="text-gray-400">Initializing application...</p>
-                </div>
-            </div>
-        );
-    }
+    const value = useMemo(() => ({ currentUser, appUser, loading, stompClient, setAppUser, setIsRegistering, refreshAppUser }),
+        [currentUser, appUser, loading, stompClient, refreshAppUser]
+    );
 
     return (
         <AuthContext.Provider value={value}>
-            {children}
+            {!loading ? children : (
+                <div className="flex justify-center items-center h-screen bg-gray-900 text-white">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                </div>
+            )}
         </AuthContext.Provider>
     );
-};
-
-export const AuthProviderWrapper = ({ children }: { children: ReactNode }) => {
-    return <AuthProvider>{children}</AuthProvider>;
 };

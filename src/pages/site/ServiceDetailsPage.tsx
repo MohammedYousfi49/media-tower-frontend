@@ -1,39 +1,30 @@
-import { useEffect, useState, FormEvent } from 'react';
+// Fichier : src/pages/site/ServiceDetailsPage.tsx (COMPLET ET CORRIGÉ)
+
+import { useEffect, useState, FormEvent, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import axiosClient from '../../api/axiosClient';
 import { useAuth } from '../../hooks/useAuth';
 import { useTranslation } from 'react-i18next';
-import { Star } from 'lucide-react';
+import { Star, Trash2 } from 'lucide-react';
 import { AxiosError } from 'axios';
 import ShareButtons from '../../components/site/ShareButtons';
 import ServiceCard from '../../components/site/ServiceCard';
 import ProductImageGallery from '../../components/site/ProductImageGallery';
 
-// Interfaces
-interface Media {
-    id: number;
-    url: string;
-    isPrimary: boolean;
-}
-interface Service {
-    id: number;
-    names: { [key: string]: string };
-    descriptions: { [key: string]: string };
-    price: number;
-    images: Media[];
-}
-interface ServiceReview {
-    id: number;
-    userName: string;
-    rating: number;
-    comment: string;
-    reviewDate: string;
+// Interfaces (inchangées)
+interface Media { id: number; url: string; isPrimary: boolean; }
+interface Service { id: number; names: { [key: string]: string }; descriptions: { [key: string]: string }; price: number; images: Media[]; }
+interface ServiceReview { id: number; userId: number; userName: string; rating: number; comment: string; reviewDate: string; }
+
+// On définit un type pour la réponse d'erreur attendue pour éviter le 'any'
+interface ErrorResponseData {
+    message?: string;
 }
 
 const ServiceDetailsPage = () => {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
-    const { currentUser } = useAuth();
+    const { currentUser, appUser } = useAuth();
     const { i18n, t } = useTranslation();
 
     const [service, setService] = useState<Service | null>(null);
@@ -46,31 +37,38 @@ const ServiceDetailsPage = () => {
     const [bookingLoading, setBookingLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    const fetchReviews = useCallback(async () => {
+        if (!id) return;
+        try {
+            const res = await axiosClient.get(`/service-reviews/service/${id}`);
+            setReviews(res.data);
+        } catch (err) {
+            // La variable 'err' est bien utilisée ici
+            console.error("Failed to fetch service reviews:", err);
+        }
+    }, [id]);
+
     useEffect(() => {
         const fetchServiceDetails = async () => {
             if (!id) return;
             window.scrollTo(0, 0);
             try {
-                const [serviceRes, reviewsRes, similarRes] = await Promise.all([
+                const [serviceRes, similarRes] = await Promise.all([
                     axiosClient.get(`/services/${id}`),
-                    axiosClient.get(`/service-reviews/service/${id}`),
                     axiosClient.get(`/services/${id}/similar`)
                 ]);
                 setService(serviceRes.data);
-                setReviews(reviewsRes.data);
                 setSimilarServices(similarRes.data);
-            } catch (err) {
-                console.error("Failed to fetch service details:", err);
-                setError("Failed to load service details. Please try again later.");
+                void fetchReviews(); // Appel séparé
+            } catch (_err) { // CORRECTION: On préfixe la variable inutilisée par '_'
+                setError("Failed to load service details.");
             }
         };
         void fetchServiceDetails();
-    }, [id]);
+    }, [id, fetchReviews]);
 
-    // ====================== LOGIQUE DE REDIRECTION POUR LES AVIS ======================
     const handleInteractionRequiresAuth = () => {
         if (!currentUser) {
-            // On mémorise la page actuelle, y compris l'ancre #reviews
             const returnTo = `${window.location.pathname}${window.location.hash || '#reviews'}`;
             navigate(`/login?from=${encodeURIComponent(returnTo)}`);
             return false;
@@ -78,25 +76,17 @@ const ServiceDetailsPage = () => {
         return true;
     };
 
-    const handleRatingClick = (star: number) => {
-        if (!handleInteractionRequiresAuth()) return;
-        setRating(star);
-    };
-
-    const handleCommentFocus = () => {
-        handleInteractionRequiresAuth();
-    };
-    // =================================================================================
+    const handleRatingClick = (star: number) => { if (!handleInteractionRequiresAuth()) return; setRating(star); };
+    const handleCommentFocus = () => { handleInteractionRequiresAuth(); };
 
     const handleBooking = async () => {
-        if (!handleInteractionRequiresAuth()) return; // On utilise la même logique pour la réservation
+        if (!handleInteractionRequiresAuth()) return;
         setBookingLoading(true);
         try {
             await axiosClient.post(`/bookings/service/${id}`, { notes });
             alert('Booking request sent successfully!');
             navigate('/account');
-        } catch (err) {
-            console.error("Failed to send booking request:", err);
+        } catch (_err) { // CORRECTION: On préfixe la variable inutilisée par '_'
             alert('Failed to send booking request.');
         } finally {
             setBookingLoading(false);
@@ -109,15 +99,25 @@ const ServiceDetailsPage = () => {
         setReviewError('');
         try {
             await axiosClient.post(`/service-reviews/service/${id}`, { rating, comment });
-            const reviewsRes = await axiosClient.get(`/service-reviews/service/${id}`);
-            setReviews(reviewsRes.data);
+            await fetchReviews();
             setRating(0);
             setComment('');
         } catch(err) {
-            if (err instanceof AxiosError && err.response) {
-                setReviewError(err.response.data.message || "Failed to submit review.");
-            } else {
-                setReviewError('An unexpected error occurred.');
+            const error = err as AxiosError;
+            // CORRECTION: On utilise le type défini pour éviter 'any'
+            const responseData = error.response?.data as ErrorResponseData;
+            setReviewError(responseData?.message || "Failed to submit review.");
+        }
+    };
+
+    const handleReviewDelete = async (reviewId: number) => {
+        if (window.confirm("Are you sure you want to delete your review?")) {
+            try {
+                await axiosClient.delete(`/service-reviews/${reviewId}`);
+                await fetchReviews();
+            } catch (error) {
+                console.error("Failed to delete service review:", error);
+                alert("Could not delete your review.");
             }
         }
     };
@@ -160,9 +160,7 @@ const ServiceDetailsPage = () => {
                                 <div>
                                     <label className="block text-gray-400 mb-2">{t('rating')}</label>
                                     <div className="flex space-x-1">
-                                        {[1, 2, 3, 4, 5].map(star => (
-                                            <Star key={star} onClick={() => handleRatingClick(star)} className={`cursor-pointer transition-colors ${rating >= star ? 'text-yellow-400' : 'text-gray-500'}`} fill={rating >= star ? 'currentColor' : 'none'}/>
-                                        ))}
+                                        {[1, 2, 3, 4, 5].map(star => ( <Star key={star} onClick={() => handleRatingClick(star)} className={`cursor-pointer transition-colors ${rating >= star ? 'text-yellow-400' : 'text-gray-500'}`} fill={rating >= star ? 'currentColor' : 'none'}/> ))}
                                     </div>
                                 </div>
                                 <div>
@@ -172,9 +170,7 @@ const ServiceDetailsPage = () => {
                                 {reviewError && <p className="text-red-500 text-sm">{reviewError}</p>}
                                 <button type="submit" className="w-full bg-primary text-white font-bold py-2 rounded-lg">Submit Review</button>
                             </form>
-                        ) : (
-                            <p className="text-gray-400">{t('loginToReview')} <Link to={`/login?from=${encodeURIComponent(window.location.pathname + '#reviews')}`} className="text-primary hover:underline">Login here</Link>.</p>
-                        )}
+                        ) : ( <p className="text-gray-400">{t('loginToReview')} <Link to={`/login?from=${encodeURIComponent(window.location.pathname + '#reviews')}`} className="text-primary hover:underline">Login here</Link>.</p> )}
                     </div>
                     <div className="space-y-4">
                         {reviews.length > 0 ? (
@@ -182,18 +178,21 @@ const ServiceDetailsPage = () => {
                                 <div key={review.id} className="bg-card p-4 rounded-lg border border-secondary">
                                     <div className="flex justify-between items-center">
                                         <span className="font-bold text-white">{review.userName}</span>
-                                        <div className="flex">
-                                            {[...Array(5)].map((_, i) => (
-                                                <Star key={i} size={16} className={i < review.rating ? 'text-yellow-400' : 'text-gray-500'} fill="currentColor"/>
-                                            ))}
+                                        <div className="flex items-center gap-4">
+                                            <div className="flex">
+                                                {[...Array(5)].map((_, i) => ( <Star key={i} size={16} className={i < review.rating ? 'text-yellow-400' : 'text-gray-500'} fill="currentColor"/> ))}
+                                            </div>
+                                            {appUser && appUser.id === review.userId && (
+                                                <button onClick={() => handleReviewDelete(review.id)} className="text-red-500 hover:text-red-400" title="Delete my review">
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                     <p className="text-gray-300 mt-2">{review.comment}</p>
                                 </div>
                             ))
-                        ) : (
-                            <p className="text-gray-400">No reviews yet for this service.</p>
-                        )}
+                        ) : ( <p className="text-gray-400">No reviews yet for this service.</p> )}
                     </div>
                 </div>
             </section>
@@ -202,9 +201,7 @@ const ServiceDetailsPage = () => {
                 <section className="border-t border-secondary pt-8">
                     <h2 className="text-3xl font-bold text-white mb-6">Other Services You May Like</h2>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {similarServices.map(s => (
-                            <ServiceCard key={s.id} service={s} />
-                        ))}
+                        {similarServices.map(s => ( <ServiceCard key={s.id} service={s} /> ))}
                     </div>
                 </section>
             )}

@@ -6,7 +6,8 @@ import { useCart } from '../../contexts/CartContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { auth } from '../../lib/firebase';
 import { useTranslation } from 'react-i18next';
-import ChatBubble from '../site/ChatBubble';
+// --- MODIFICATION : L'ancien ChatBubble est remplacé par le WhatsAppButton ---
+import WhatsAppButton from '../site/WhatsAppButton';
 
 const SiteLayout = ({ children }: { children: ReactNode }) => {
     const { currentUser, appUser } = useAuth();
@@ -127,7 +128,8 @@ const SiteLayout = ({ children }: { children: ReactNode }) => {
                 </div>
             </footer>
 
-            <ChatBubble />
+            {/* --- MODIFICATION : Remplacement de ChatBubble par WhatsAppButton --- */}
+            <WhatsAppButton />
         </div>
     );
 };

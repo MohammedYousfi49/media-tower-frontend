@@ -1,8 +1,9 @@
-// src/pages/auth/Register.tsx
+// Fichier : src/pages/auth/Register.tsx (COMPLET ET CORRIGÉ)
 
 import { useState, FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+// ▼▼▼ "updateProfile" est ajouté ici ▼▼▼
+import { createUserWithEmailAndPassword, signOut, updateProfile } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
 import axiosClient from '../../api/axiosClient';
 import { FirebaseError } from 'firebase/app';
@@ -47,6 +48,15 @@ const Register = () => {
             const userCredential = await createUserWithEmailAndPassword(auth, email, password);
             const firebaseUser = userCredential.user;
 
+            // ▼▼▼ BLOC DE CORRECTION AJOUTÉ ▼▼▼
+            // Met à jour le profil utilisateur directement dans Firebase.
+            // C'est la solution robuste pour que le nom et prénom soient toujours corrects.
+            await updateProfile(firebaseUser, {
+                displayName: `${firstName} ${lastName}`.trim()
+            });
+            console.log("RegisterPage: Firebase profile updated with displayName.");
+            // ▲▲▲ FIN DU BLOC DE CORRECTION ▲▲▲
+
             await signOut(auth);
             console.log("RegisterPage: Successfully created Firebase user, then signed out to prevent premature /users/me call.");
 
@@ -90,7 +100,6 @@ const Register = () => {
                     <p className="text-gray-400">
                         We've sent a verification link to your email address. Please check your inbox (and spam folder) to complete your registration.
                     </p>
-                    {/* CHANGEMENT: Supprimer le paramètre status=unverified */}
                     <Link to="/login" className="inline-block mt-4 text-primary hover:underline">
                         Back to Login
                     </Link>
